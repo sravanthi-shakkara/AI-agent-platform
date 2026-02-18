@@ -1,0 +1,15 @@
+# VS Code
+.vscode/
+
+# Java
+orchestrator/target/
+
+# Python
+__pycache__/
+*.pyc
+
+# Environment variables
+.env
+
+# Logs
+*.log
