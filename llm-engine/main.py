@@ -1,35 +1,25 @@
 import os
 import json
 import asyncio
+import threading
 import redis
 from fastapi import FastAPI
 from openai import OpenAI
-import httpx
 
 app = FastAPI()
 
-# Connect to Redis
 r = redis.Redis(
     host=os.getenv("REDIS_HOST", "localhost"),
     port=int(os.getenv("REDIS_PORT", 6379)),
     decode_responses=True
 )
 
-# Connect to OpenAI
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 SYSTEM_PROMPT = """You are a task decomposition agent.
 Given a user's natural language request, break it into a JSON array of subtasks.
 Each subtask must have this format:
 {"action": "search" or "navigate" or "extract" or "summarize", "target": "url or search query", "params": {}}
-
-Example input: "Find top 5 Python web frameworks"
-Example output:
-[
-  {"action": "search", "target": "top 5 Python web frameworks 2024", "params": {}},
-  {"action": "summarize", "target": "search results", "params": {}}
-]
-
 Return ONLY the JSON array. No explanation. No markdown. Just the raw JSON array."""
 
 @app.get("/health")
@@ -37,7 +27,7 @@ def health():
     return {"status": "ok"}
 
 @app.post("/summarize")
-async def summarize(data: dict):
+def summarize(data: dict):
     text = data.get("text", "")
     response = client.chat.completions.create(
         model="gpt-4o-mini",
@@ -48,30 +38,25 @@ async def summarize(data: dict):
     )
     return {"summary": response.choices[0].message.content}
 
-async def process_queue():
-    """This runs in the background, picking tasks from Redis queue"""
-    print("LLM Engine: Starting queue processor...")
+def process_queue():
+    """Runs in a background thread, picking tasks from Redis queue"""
+    print("LLM Engine: Queue processor thread started!")
     while True:
         try:
-            # Wait for a task (blocking pop with 2 second timeout)
-            result = r.brpop("task:queue", timeout=2)
-            
+            result = r.brpop("task:queue", timeout=5)
             if result:
                 _, task_id = result
-                print(f"LLM Engine: Processing task {task_id}")
-                
-                # Get task details from Redis
+                print(f"LLM Engine: Got task {task_id}")
+
                 task_key = f"task:{task_id}"
                 user_input = r.hget(task_key, "input")
-                
+
                 if not user_input:
-                    print(f"LLM Engine: No input found for task {task_id}")
+                    print(f"LLM Engine: No input for task {task_id}")
                     continue
-                
-                # Update status
+
                 r.hset(task_key, "status", "DECOMPOSING")
-                
-                # Ask OpenAI to break task into subtasks
+
                 response = client.chat.completions.create(
                     model="gpt-4o-mini",
                     messages=[
@@ -79,24 +64,36 @@ async def process_queue():
                         {"role": "user", "content": user_input}
                     ]
                 )
-                
+
                 subtasks_json = response.choices[0].message.content.strip()
-                print(f"LLM Engine: Subtasks generated: {subtasks_json}")
-                
-                # Push to browser worker queue
+                print(f"LLM Engine: Subtasks: {subtasks_json}")
+
                 job = json.dumps({
                     "task_id": task_id,
                     "subtasks": json.loads(subtasks_json)
                 })
                 r.lpush("browser:queue", job)
                 r.hset(task_key, "status", "PROCESSING")
-                
+                print(f"LLM Engine: Task {task_id} pushed to browser worker")
+
         except json.JSONDecodeError as e:
-            print(f"LLM Engine: JSON parse error: {e}")
+            print(f"LLM Engine: JSON error: {e}")
         except Exception as e:
             print(f"LLM Engine: Error: {e}")
-            await asyncio.sleep(1)
+            import time
+            time.sleep(1)
 
 @app.on_event("startup")
-async def startup_event():
-    asyncio.create_task(process_queue())
+def startup_event():
+    print("LLM Engine: Starting background thread...")
+    t = threading.Thread(target=process_queue, daemon=True)
+    t.start()
+    print("LLM Engine: Background thread started!")
+
+if __name__ == "__main__":
+    import uvicorn
+    # Start background thread
+    t = threading.Thread(target=process_queue, daemon=True)
+    t.start()
+    print("LLM Engine: Started directly!")
+    uvicorn.run(app, host="0.0.0.0", port=8001)

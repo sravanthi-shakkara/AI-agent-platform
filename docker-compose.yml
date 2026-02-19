@@ -15,7 +15,7 @@ services:
     environment:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      - JWT_SECRET=mysecretkey123456789
+      - JWT_SECRET=my-super-secure-jwt-secret-key-256-bit-minimum-length
     depends_on:
       - redis
     networks:
