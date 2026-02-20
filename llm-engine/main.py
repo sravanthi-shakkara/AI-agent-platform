@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from openai import OpenAI
 
 app = FastAPI()
-
+# Connect to Redis using environment variables from docker-compose.yml
 r = redis.Redis(
     host=os.getenv("REDIS_HOST", "localhost"),
     port=int(os.getenv("REDIS_PORT", 6379)),
@@ -37,7 +37,7 @@ def summarize(data: dict):
         ]
     )
     return {"summary": response.choices[0].message.content}
-
+# Background thread that watches Redis queue for new tasks
 def process_queue():
     """Runs in a background thread, picking tasks from Redis queue"""
     print("LLM Engine: Queue processor thread started!")
