@@ -1,3 +1,8 @@
+# LLM Engine - FastAPI service that processes tasks from Redis queue
+# Uses OpenAI GPT-4o-mini to decompose natural language tasks into subtasks
+# Runs a background thread to continuously watch for new tasks
+
+
 import os
 import json
 import asyncio
